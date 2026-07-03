@@ -1,0 +1,18 @@
+[package]
+name = "starknet-base-poc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1"
+alloy = "2"
+bs58 = "0.5"
+base64 = "0.22.1"
+reqwest = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+starknet = "0.17"
+starknet-crypto = "0.8"
+time = { version = "0.3", features = ["formatting"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+dotenv = "0.15.0"
