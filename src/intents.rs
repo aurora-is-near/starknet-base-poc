@@ -37,7 +37,7 @@ pub async fn fetch_intermediary_address() -> anyhow::Result<Address> {
     response["result"]["evm"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("intermediary address not found"))
-        .map(|a| Address::from_hex(a).unwrap())
+        .and_then(|a| Address::from_hex(a).map_err(Into::into))
 }
 
 pub fn create_quote_request(
@@ -59,7 +59,7 @@ pub fn create_quote_request(
         "sessionId": "session_abc123",
         "amount": amount.to_string(),
         "originAsset": "nep141:starknet.omft.near", // STRK on Starknet
-        "destinationAsset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", // "nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near", // USDC on Ethereum
+        "destinationAsset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near", // USDC on Base
         "slippageTolerance": 100,
         "refundTo": env::var("STRK_VAULT_ADDRESS")?,
         "refundType": "ORIGIN_CHAIN",
@@ -144,11 +144,11 @@ pub async fn execute_steps_request(request: &serde_json::Value) -> anyhow::Resul
         fee: response["details"]["networkFee"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("networkFee field not found"))
-            .map(|a| a.parse().unwrap())?,
+            .and_then(|a| a.parse().map_err(Into::into))?,
         id: response["id"].as_str().map(str::to_string),
         payload: response["details"]["payload"]["payload_bytes_base64"]
             .as_str()
-            .map(|a| base64::engine::general_purpose::STANDARD.decode(a).unwrap()),
+            .and_then(|a| base64::engine::general_purpose::STANDARD.decode(a).ok()),
     })
 }
 

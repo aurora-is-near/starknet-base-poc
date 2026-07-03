@@ -1,9 +1,9 @@
 use alloy::hex::FromHex;
 use alloy::primitives::{Address, address};
-use starknet_crypto::Felt;
+use starknet::core::types::Felt;
 use std::env;
 
-use crate::intents::QuoteResponse;
+use crate::intents::{QuoteResponse, StepResponse};
 
 mod intents;
 mod utils;
@@ -29,7 +29,7 @@ const USDC_ON_BASE: Address = address!("0x833589fcd6edb6e08f4c7c32d4f71b54bda029
 async fn main() -> anyhow::Result<()> {
     dotenv::dotenv()?;
     let provider = utils::create_provider()?;
-    let vault_address = env::var("STRK_VAULT_ADDRESS").map(|a| Felt::from_hex(&a).unwrap())?;
+    let vault_address = utils::read_strk_address("STRK_VAULT_ADDRESS")?;
 
     // 1. Wait for balance increasing on the starknet account.
 
@@ -58,12 +58,12 @@ async fn main() -> anyhow::Result<()> {
     // Make a transfer to the deposit address provided by the Aurora Swap API on Starknet.
     let transfer_result = utils::transfer_strk(
         &provider,
-        env::var("STRK_VAULT_PRIVATE_KEY").map(|a| Felt::from_hex(&a).unwrap())?,
+        utils::read_strk_address("STRK_VAULT_PRIVATE_KEY")?,
         vault_address,
         deposit_address
-            .map(|a| Felt::from_hex(&a).unwrap())
+            .and_then(|a| Felt::from_hex(&a).ok())
             .ok_or_else(|| anyhow::anyhow!("deposit address not found"))?,
-        deposit.to_string(),
+        deposit,
     )
     .await?;
 
@@ -74,7 +74,8 @@ async fn main() -> anyhow::Result<()> {
 
     // 3. Wait for the transfer to be confirmed on the EVM network.
 
-    // Check balance in a loop and break when the balance is increased.
+    // Check balance in a loop and break when the balance is increased. In real life, could be
+    // replaced with listening to the event on the EVM network.
     println!(">>> Start waiting for balance increasing on the intermediary EVM address");
 
     let base_provider = utils::create_base_provider()?;
@@ -87,13 +88,17 @@ async fn main() -> anyhow::Result<()> {
     // to move them to the custody address or execute another custom logic.
 
     // The first request must be dry. We want to get the fee amount to substruct it from the deposit amount.
-    let vault = env::var("VAULT_ON_EVM").map(|a| Address::from_hex(&a).unwrap())?;
+    let vault = Address::from_hex(&env::var("VAULT_ON_EVM")?)?;
     let steps_request = intents::create_steps_request(true, usdc_deposit, vault)?;
     let steps_response = intents::execute_steps_request(&steps_request).await?;
 
-    let usdc_deposit_without_fee = usdc_deposit
-        .checked_sub(alloy::primitives::U256::from(steps_response.fee))
-        .unwrap();
+    let usdc_deposit_without_fee =
+        usdc_deposit.saturating_sub(alloy::primitives::U256::from(steps_response.fee));
+
+    anyhow::ensure!(
+        usdc_deposit_without_fee > alloy::primitives::U256::ZERO,
+        "Nothing to deposit after fee deduction"
+    );
 
     println!(
         ">>> Amount of USDC without fee: {usdc_deposit_without_fee}, and fee: {}",
@@ -102,16 +107,23 @@ async fn main() -> anyhow::Result<()> {
 
     // The second request is for getting payload of intent for signing.
     let steps_request = intents::create_steps_request(false, usdc_deposit_without_fee, vault)?;
-    let steps_response = intents::execute_steps_request(&steps_request).await?;
+    let StepResponse { id, payload, .. } = intents::execute_steps_request(&steps_request).await?;
 
     // Sign the payload with the private key of the backend EVM address.
     let signature = utils::sign_message_erc191(
         &env::var("BACKEND_EVM_PRIVATE_KEY")?,
-        steps_response.payload.as_deref().unwrap(),
+        payload
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("Payload is empty"))?,
     )?;
     println!(">>> Signature: {signature}");
 
-    intents::submit_signature(steps_response.id.as_deref().unwrap(), &signature).await?;
+    intents::submit_signature(
+        id.as_deref()
+            .ok_or_else(|| anyhow::anyhow!("ID is empty"))?,
+        &signature,
+    )
+    .await?;
 
     println!(">>> Start waiting for balance increasing on the VAULT EVM address");
 

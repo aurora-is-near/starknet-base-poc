@@ -137,7 +137,7 @@ pub async fn transfer_strk<P>(
     sender_private_key: Felt,
     sender_address: Felt,
     recipient: Felt,
-    amount: String,
+    amount: U256,
 ) -> anyhow::Result<InvokeTransactionResult>
 where
     P: Provider + Send + Sync,
@@ -154,7 +154,6 @@ where
     );
     account.set_block_id(BlockId::Tag(BlockTag::Latest));
 
-    let amount: U256 = Felt::from_dec_str(&amount)?.into();
     let call = Call {
         to: STRK_TOKEN_ADDRESS,
         selector: get_selector_from_name("transfer")?,
@@ -169,4 +168,9 @@ where
     let _fee = request.estimate_fee().await?;
 
     request.send().await.map_err(Into::into)
+}
+
+pub fn read_strk_address(key: &str) -> anyhow::Result<Felt> {
+    let value = env::var(key)?;
+    Felt::from_hex(&value).map_err(Into::into)
 }
